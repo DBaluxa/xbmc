@@ -1360,7 +1360,7 @@ void CAESinkALSA::EnumerateDevice(AEDeviceInfoList &list, const std::string &dev
 
   CAEDeviceInfo info;
   info.m_deviceName = device;
-  info.m_deviceType = AEDeviceTypeFromName(device);
+  info.m_deviceType = AE_DEVTYPE_HDMI;//AEDeviceTypeFromName(device);
 
   if (cardNr >= 0)
   {
