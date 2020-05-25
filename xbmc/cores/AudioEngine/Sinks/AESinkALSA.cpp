@@ -1307,6 +1307,75 @@ void CAESinkALSA::EnumerateDevicesEx(AEDeviceInfoList &list, bool force)
   }
 }
 
+std::set<std::pair<std::string, std::string> > getSoundHardwareIdAndName(int cardNr)
+{
+  snd_ctl_t *handle;
+  int card, err, dev, idx;
+  snd_ctl_card_info_t *info;
+  snd_pcm_info_t *pcminfo;
+  snd_ctl_card_info_alloca(&info);
+  snd_pcm_info_alloca(&pcminfo);
+  std::set<std::pair<std::string, std::string> > cardNames;
+  if( cardNr >= 0 ) {
+    card = cardNr;
+  } else {
+    card = -1;
+    if (snd_card_next(&card) < 0 || card < 0) {
+      return cardNames;
+    }
+  }
+  while (card >= 0) {
+    char name[32];
+    sprintf(name, "hw:%d", card);
+    if ((err = snd_ctl_open(&handle, name, 0)) < 0) {
+      goto next_card;
+    }
+    if ((err = snd_ctl_card_info(handle, info)) < 0) {
+      snd_ctl_close(handle);
+      goto next_card;
+    }
+    dev = -1;
+    while (1) {
+      unsigned int count;
+      if (snd_ctl_pcm_next_device(handle, &dev)<0)
+	CLog::Log(LOGERROR, "CAESinkALSA - Error: snd_ctl_pcm_next_device");
+      if (dev < 0)
+	break;
+      snd_pcm_info_set_device(pcminfo, dev);
+      snd_pcm_info_set_subdevice(pcminfo, 0);
+      if ((err = snd_ctl_pcm_info(handle, pcminfo)) < 0) {
+	if (err != -ENOENT)
+  	  CLog::Log(LOGERROR, "CAESinkALSA - Error: control digital audio info (%i): %s", card, snd_strerror(err));
+	continue;
+      }
+      CLog::Log(LOGINFO, "CAESinkALSA - Card %i: %s [%s], device %i: %s [%s]\n",
+        card, snd_ctl_card_info_get_id(info), snd_ctl_card_info_get_name(info),
+        dev,
+        snd_pcm_info_get_id(pcminfo),
+        snd_pcm_info_get_name(pcminfo));
+      cardNames.insert(std::make_pair(snd_ctl_card_info_get_id(info), snd_ctl_card_info_get_name(info)));
+    }
+    snd_ctl_close(handle);
+    next_card:
+      if (snd_card_next(&card) < 0 || cardNr >= 0) {
+	break;
+      }
+  }
+  return cardNames;
+}
+
+bool checkCardIdAndName(std::string cardId, std::string cardName, std::set<std::pair<std::string, std::string> > cardNames){
+  bool isOdroid = true;
+  bool cardFound = false;
+  for (std::set<std::pair<std::string, std::string> >::iterator it = cardNames.begin();
+    it != cardNames.end(); ++it)
+  {
+    cardFound = true;
+    isOdroid = isOdroid && cardId == it->first && cardName == it->second;
+  }
+  return cardFound && isOdroid;
+}
+
 AEDeviceType CAESinkALSA::AEDeviceTypeFromName(const std::string &name)
 {
 
@@ -1360,7 +1429,12 @@ void CAESinkALSA::EnumerateDevice(AEDeviceInfoList &list, const std::string &dev
 
   CAEDeviceInfo info;
   info.m_deviceName = device;
-  info.m_deviceType = AE_DEVTYPE_HDMI;//AEDeviceTypeFromName(device);
+  info.m_deviceType = AEDeviceTypeFromName(device);
+
+  if(checkCardIdAndName("odroidaudio", "odroid-audio", getSoundHardwareIdAndName(cardNr))) {
+    CLog::Log(LOGINFO, "CAESinkALSA - Odroid audio detected, overriding output to HDMI...");
+    info.m_deviceType = AE_DEVTYPE_HDMI;
+  }
 
   if (cardNr >= 0)
   {
